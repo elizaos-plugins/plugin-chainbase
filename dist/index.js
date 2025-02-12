@@ -14,7 +14,6 @@ var MAX_DP = 1e6;
 var MAX_POWER = 1e6;
 var NE = -7;
 var PE = 21;
-var STRICT = false;
 var NAME = "[big.js] ";
 var INVALID = NAME + "Invalid ";
 var INVALID_DP = INVALID + "decimal places";
@@ -32,12 +31,6 @@ function _Big_() {
       x.e = n.e;
       x.c = n.c.slice();
     } else {
-      if (typeof n !== "string") {
-        if (Big2.strict === true && typeof n !== "bigint") {
-          throw TypeError(INVALID + "value");
-        }
-        n = n === 0 && 1 / n < 0 ? "-0" : String(n);
-      }
       parse(x, n);
     }
     x.constructor = Big2;
@@ -47,18 +40,13 @@ function _Big_() {
   Big2.RM = RM;
   Big2.NE = NE;
   Big2.PE = PE;
-  Big2.strict = STRICT;
-  Big2.roundDown = 0;
-  Big2.roundHalfUp = 1;
-  Big2.roundHalfEven = 2;
-  Big2.roundUp = 3;
+  Big2.version = "5.2.2";
   return Big2;
 }
 function parse(x, n) {
   var e, i, nl;
-  if (!NUMERIC.test(n)) {
-    throw Error(INVALID + "number");
-  }
+  if (n === 0 && 1 / n < 0) n = "-0";
+  else if (!NUMERIC.test(n += "")) throw Error(INVALID + "number");
   x.s = n.charAt(0) == "-" ? (n = n.slice(1), -1) : 1;
   if ((e = n.indexOf(".")) > -1) n = n.replace(".", "");
   if ((i = n.search(/e/i)) > 0) {
@@ -80,55 +68,72 @@ function parse(x, n) {
   }
   return x;
 }
-function round(x, sd, rm, more) {
-  var xc = x.c;
-  if (rm === UNDEFINED) rm = x.constructor.RM;
-  if (rm !== 0 && rm !== 1 && rm !== 2 && rm !== 3) {
-    throw Error(INVALID_RM);
-  }
-  if (sd < 1) {
-    more = rm === 3 && (more || !!xc[0]) || sd === 0 && (rm === 1 && xc[0] >= 5 || rm === 2 && (xc[0] > 5 || xc[0] === 5 && (more || xc[1] !== UNDEFINED)));
-    xc.length = 1;
-    if (more) {
-      x.e = x.e - sd + 1;
-      xc[0] = 1;
+function round(x, dp, rm, more) {
+  var xc = x.c, i = x.e + dp + 1;
+  if (i < xc.length) {
+    if (rm === 1) {
+      more = xc[i] >= 5;
+    } else if (rm === 2) {
+      more = xc[i] > 5 || xc[i] == 5 && (more || i < 0 || xc[i + 1] !== UNDEFINED || xc[i - 1] & 1);
+    } else if (rm === 3) {
+      more = more || !!xc[0];
     } else {
-      xc[0] = x.e = 0;
+      more = false;
+      if (rm !== 0) throw Error(INVALID_RM);
     }
-  } else if (sd < xc.length) {
-    more = rm === 1 && xc[sd] >= 5 || rm === 2 && (xc[sd] > 5 || xc[sd] === 5 && (more || xc[sd + 1] !== UNDEFINED || xc[sd - 1] & 1)) || rm === 3 && (more || !!xc[0]);
-    xc.length = sd;
-    if (more) {
-      for (; ++xc[--sd] > 9; ) {
-        xc[sd] = 0;
-        if (sd === 0) {
-          ++x.e;
-          xc.unshift(1);
-          break;
+    if (i < 1) {
+      xc.length = 1;
+      if (more) {
+        x.e = -dp;
+        xc[0] = 1;
+      } else {
+        xc[0] = x.e = 0;
+      }
+    } else {
+      xc.length = i--;
+      if (more) {
+        for (; ++xc[i] > 9; ) {
+          xc[i] = 0;
+          if (!i--) {
+            ++x.e;
+            xc.unshift(1);
+          }
         }
       }
+      for (i = xc.length; !xc[--i]; ) xc.pop();
     }
-    for (sd = xc.length; !xc[--sd]; ) xc.pop();
+  } else if (rm < 0 || rm > 3 || rm !== ~~rm) {
+    throw Error(INVALID_RM);
   }
   return x;
 }
-function stringify(x, doExponential, isNonzero) {
-  var e = x.e, s = x.c.join(""), n = s.length;
-  if (doExponential) {
+function stringify(x, id, n, k) {
+  var e, s, Big2 = x.constructor, z2 = !x.c[0];
+  if (n !== UNDEFINED) {
+    if (n !== ~~n || n < (id == 3) || n > MAX_DP) {
+      throw Error(id == 3 ? INVALID + "precision" : INVALID_DP);
+    }
+    x = new Big2(x);
+    n = k - x.e;
+    if (x.c.length > ++k) round(x, n, Big2.RM);
+    if (id == 2) k = x.e + n + 1;
+    for (; x.c.length < k; ) x.c.push(0);
+  }
+  e = x.e;
+  s = x.c.join("");
+  n = s.length;
+  if (id != 2 && (id == 1 || id == 3 && k <= e || e <= Big2.NE || e >= Big2.PE)) {
     s = s.charAt(0) + (n > 1 ? "." + s.slice(1) : "") + (e < 0 ? "e" : "e+") + e;
   } else if (e < 0) {
     for (; ++e; ) s = "0" + s;
     s = "0." + s;
   } else if (e > 0) {
-    if (++e > n) {
-      for (e -= n; e--; ) s += "0";
-    } else if (e < n) {
-      s = s.slice(0, e) + "." + s.slice(e);
-    }
+    if (++e > n) for (e -= n; e--; ) s += "0";
+    else if (e < n) s = s.slice(0, e) + "." + s.slice(e);
   } else if (n > 1) {
     s = s.charAt(0) + "." + s.slice(1);
   }
-  return x.s < 0 && isNonzero ? "-" + s : s;
+  return x.s < 0 && (!z2 || id == 4) ? "-" + s : s;
 }
 P.abs = function() {
   var x = new this.constructor(this);
@@ -149,20 +154,12 @@ P.cmp = function(y) {
 };
 P.div = function(y) {
   var x = this, Big2 = x.constructor, a = x.c, b = (y = new Big2(y)).c, k = x.s == y.s ? 1 : -1, dp = Big2.DP;
-  if (dp !== ~~dp || dp < 0 || dp > MAX_DP) {
-    throw Error(INVALID_DP);
-  }
-  if (!b[0]) {
-    throw Error(DIV_BY_ZERO);
-  }
-  if (!a[0]) {
-    y.s = k;
-    y.c = [y.e = 0];
-    return y;
-  }
-  var bl, bt, n, cmp, ri, bz = b.slice(), ai = bl = b.length, al = a.length, r = a.slice(0, bl), rl = r.length, q = y, qc = q.c = [], qi = 0, p = dp + (q.e = x.e - y.e) + 1;
+  if (dp !== ~~dp || dp < 0 || dp > MAX_DP) throw Error(INVALID_DP);
+  if (!b[0]) throw Error(DIV_BY_ZERO);
+  if (!a[0]) return new Big2(k * 0);
+  var bl, bt, n, cmp, ri, bz = b.slice(), ai = bl = b.length, al = a.length, r = a.slice(0, bl), rl = r.length, q = y, qc = q.c = [], qi = 0, d = dp + (q.e = x.e - y.e) + 1;
   q.s = k;
-  k = p < 0 ? 0 : p;
+  k = d < 0 ? 0 : d;
   bz.unshift(0);
   for (; rl++ < bl; ) r.push(0);
   do {
@@ -199,13 +196,12 @@ P.div = function(y) {
   if (!qc[0] && qi != 1) {
     qc.shift();
     q.e--;
-    p--;
   }
-  if (qi > p) round(q, p, Big2.RM, r[0] !== UNDEFINED);
+  if (qi > d) round(q, dp, Big2.RM, r[0] !== UNDEFINED);
   return q;
 };
 P.eq = function(y) {
-  return this.cmp(y) === 0;
+  return !this.cmp(y);
 };
 P.gt = function(y) {
   return this.cmp(y) > 0;
@@ -227,14 +223,7 @@ P.minus = P.sub = function(y) {
   }
   var xc = x.c.slice(), xe = x.e, yc = y.c, ye = y.e;
   if (!xc[0] || !yc[0]) {
-    if (yc[0]) {
-      y.s = -b;
-    } else if (xc[0]) {
-      y = new Big2(x);
-    } else {
-      y.s = 1;
-    }
-    return y;
+    return yc[0] ? (y.s = -b, y) : new Big2(xc[0] ? x : 0);
   }
   if (a = xe - ye) {
     if (xlty = a < 0) {
@@ -286,9 +275,7 @@ P.minus = P.sub = function(y) {
 };
 P.mod = function(y) {
   var ygtx, x = this, Big2 = x.constructor, a = x.s, b = (y = new Big2(y)).s;
-  if (!y.c[0]) {
-    throw Error(DIV_BY_ZERO);
-  }
+  if (!y.c[0]) throw Error(DIV_BY_ZERO);
   x.s = y.s = 1;
   ygtx = y.cmp(x) == 1;
   x.s = a;
@@ -302,40 +289,25 @@ P.mod = function(y) {
   Big2.RM = b;
   return this.minus(x.times(y));
 };
-P.neg = function() {
-  var x = new this.constructor(this);
-  x.s = -x.s;
-  return x;
-};
 P.plus = P.add = function(y) {
-  var e, k, t, x = this, Big2 = x.constructor;
-  y = new Big2(y);
-  if (x.s != y.s) {
-    y.s = -y.s;
+  var t, x = this, Big2 = x.constructor, a = x.s, b = (y = new Big2(y)).s;
+  if (a != b) {
+    y.s = -b;
     return x.minus(y);
   }
   var xe = x.e, xc = x.c, ye = y.e, yc = y.c;
-  if (!xc[0] || !yc[0]) {
-    if (!yc[0]) {
-      if (xc[0]) {
-        y = new Big2(x);
-      } else {
-        y.s = x.s;
-      }
-    }
-    return y;
-  }
+  if (!xc[0] || !yc[0]) return yc[0] ? y : new Big2(xc[0] ? x : a * 0);
   xc = xc.slice();
-  if (e = xe - ye) {
-    if (e > 0) {
+  if (a = xe - ye) {
+    if (a > 0) {
       ye = xe;
       t = yc;
     } else {
-      e = -e;
+      a = -a;
       t = xc;
     }
     t.reverse();
-    for (; e--; ) t.push(0);
+    for (; a--; ) t.push(0);
     t.reverse();
   }
   if (xc.length - yc.length < 0) {
@@ -343,22 +315,20 @@ P.plus = P.add = function(y) {
     yc = xc;
     xc = t;
   }
-  e = yc.length;
-  for (k = 0; e; xc[e] %= 10) k = (xc[--e] = xc[e] + yc[e] + k) / 10 | 0;
-  if (k) {
-    xc.unshift(k);
+  a = yc.length;
+  for (b = 0; a; xc[a] %= 10) b = (xc[--a] = xc[a] + yc[a] + b) / 10 | 0;
+  if (b) {
+    xc.unshift(b);
     ++ye;
   }
-  for (e = xc.length; xc[--e] === 0; ) xc.pop();
+  for (a = xc.length; xc[--a] === 0; ) xc.pop();
   y.c = xc;
   y.e = ye;
   return y;
 };
 P.pow = function(n) {
-  var x = this, one = new x.constructor("1"), y = one, isneg = n < 0;
-  if (n !== ~~n || n < -MAX_POWER || n > MAX_POWER) {
-    throw Error(INVALID + "exponent");
-  }
+  var x = this, one = new x.constructor(1), y = one, isneg = n < 0;
+  if (n !== ~~n || n < -MAX_POWER || n > MAX_POWER) throw Error(INVALID + "exponent");
   if (isneg) n = -n;
   for (; ; ) {
     if (n & 1) y = y.times(x);
@@ -368,49 +338,37 @@ P.pow = function(n) {
   }
   return isneg ? one.div(y) : y;
 };
-P.prec = function(sd, rm) {
-  if (sd !== ~~sd || sd < 1 || sd > MAX_DP) {
-    throw Error(INVALID + "precision");
-  }
-  return round(new this.constructor(this), sd, rm);
-};
 P.round = function(dp, rm) {
+  var Big2 = this.constructor;
   if (dp === UNDEFINED) dp = 0;
-  else if (dp !== ~~dp || dp < -MAX_DP || dp > MAX_DP) {
-    throw Error(INVALID_DP);
-  }
-  return round(new this.constructor(this), dp + this.e + 1, rm);
+  else if (dp !== ~~dp || dp < -MAX_DP || dp > MAX_DP) throw Error(INVALID_DP);
+  return round(new Big2(this), dp, rm === UNDEFINED ? Big2.RM : rm);
 };
 P.sqrt = function() {
-  var r, c, t, x = this, Big2 = x.constructor, s = x.s, e = x.e, half = new Big2("0.5");
+  var r, c, t, x = this, Big2 = x.constructor, s = x.s, e = x.e, half = new Big2(0.5);
   if (!x.c[0]) return new Big2(x);
-  if (s < 0) {
-    throw Error(NAME + "No square root");
-  }
-  s = Math.sqrt(+stringify(x, true, true));
+  if (s < 0) throw Error(NAME + "No square root");
+  s = Math.sqrt(x + "");
   if (s === 0 || s === 1 / 0) {
     c = x.c.join("");
     if (!(c.length + e & 1)) c += "0";
     s = Math.sqrt(c);
     e = ((e + 1) / 2 | 0) - (e < 0 || e & 1);
-    r = new Big2((s == 1 / 0 ? "5e" : (s = s.toExponential()).slice(0, s.indexOf("e") + 1)) + e);
+    r = new Big2((s == 1 / 0 ? "1e" : (s = s.toExponential()).slice(0, s.indexOf("e") + 1)) + e);
   } else {
-    r = new Big2(s + "");
+    r = new Big2(s);
   }
   e = r.e + (Big2.DP += 4);
   do {
     t = r;
     r = half.times(t.plus(x.div(t)));
   } while (t.c.slice(0, e).join("") !== r.c.slice(0, e).join(""));
-  return round(r, (Big2.DP -= 4) + r.e + 1, Big2.RM);
+  return round(r, Big2.DP -= 4, Big2.RM);
 };
 P.times = P.mul = function(y) {
   var c, x = this, Big2 = x.constructor, xc = x.c, yc = (y = new Big2(y)).c, a = xc.length, b = yc.length, i = x.e, j = y.e;
   y.s = x.s == y.s ? 1 : -1;
-  if (!xc[0] || !yc[0]) {
-    y.c = [y.e = 0];
-    return y;
-  }
+  if (!xc[0] || !yc[0]) return new Big2(y.s * 0);
   y.e = i + j;
   if (a < b) {
     c = xc;
@@ -428,7 +386,7 @@ P.times = P.mul = function(y) {
       c[j--] = b % 10;
       b = b / 10 | 0;
     }
-    c[j] = b;
+    c[j] = (c[j] + b) % 10;
   }
   if (b) ++y.e;
   else c.shift();
@@ -436,56 +394,20 @@ P.times = P.mul = function(y) {
   y.c = c;
   return y;
 };
-P.toExponential = function(dp, rm) {
-  var x = this, n = x.c[0];
-  if (dp !== UNDEFINED) {
-    if (dp !== ~~dp || dp < 0 || dp > MAX_DP) {
-      throw Error(INVALID_DP);
-    }
-    x = round(new x.constructor(x), ++dp, rm);
-    for (; x.c.length < dp; ) x.c.push(0);
-  }
-  return stringify(x, true, !!n);
+P.toExponential = function(dp) {
+  return stringify(this, 1, dp, dp);
 };
-P.toFixed = function(dp, rm) {
-  var x = this, n = x.c[0];
-  if (dp !== UNDEFINED) {
-    if (dp !== ~~dp || dp < 0 || dp > MAX_DP) {
-      throw Error(INVALID_DP);
-    }
-    x = round(new x.constructor(x), dp + x.e + 1, rm);
-    for (dp = dp + x.e + 1; x.c.length < dp; ) x.c.push(0);
-  }
-  return stringify(x, false, !!n);
+P.toFixed = function(dp) {
+  return stringify(this, 2, dp, this.e + dp);
 };
-P[Symbol.for("nodejs.util.inspect.custom")] = P.toJSON = P.toString = function() {
-  var x = this, Big2 = x.constructor;
-  return stringify(x, x.e <= Big2.NE || x.e >= Big2.PE, !!x.c[0]);
+P.toPrecision = function(sd) {
+  return stringify(this, 3, sd, sd - 1);
 };
-P.toNumber = function() {
-  var n = +stringify(this, true, true);
-  if (this.constructor.strict === true && !this.eq(n.toString())) {
-    throw Error(NAME + "Imprecise conversion");
-  }
-  return n;
+P.toString = function() {
+  return stringify(this);
 };
-P.toPrecision = function(sd, rm) {
-  var x = this, Big2 = x.constructor, n = x.c[0];
-  if (sd !== UNDEFINED) {
-    if (sd !== ~~sd || sd < 1 || sd > MAX_DP) {
-      throw Error(INVALID + "precision");
-    }
-    x = round(new Big2(x), sd, rm);
-    for (; x.c.length < sd; ) x.c.push(0);
-  }
-  return stringify(x, sd <= x.e || x.e <= Big2.NE || x.e >= Big2.PE, !!n);
-};
-P.valueOf = function() {
-  var x = this, Big2 = x.constructor;
-  if (Big2.strict === true) {
-    throw Error(NAME + "valueOf disallowed");
-  }
-  return stringify(x, x.e <= Big2.NE || x.e >= Big2.PE, true);
+P.valueOf = P.toJSON = function() {
+  return stringify(this, 4);
 };
 var Big = _Big_();
 var big_default = Big;
