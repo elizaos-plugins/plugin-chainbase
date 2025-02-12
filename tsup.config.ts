@@ -6,5 +6,5 @@ export default defineConfig({
     sourcemap: true,
     clean: true,
     format: ["esm"], // Ensure you're targeting CommonJS
-    external: [],
+    external: [ "@elizaos/core",],
 });
