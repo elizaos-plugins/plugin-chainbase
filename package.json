@@ -18,5 +18,16 @@
         "lint:fix": "biome check --apply .",
         "format": "biome format .",
         "format:fix": "biome format --write ."
+    },
+    "agentConfig": {
+        "pluginType": "elizaos:client:1.0.0",
+        "pluginParameters": {
+            "CHAINBASE_API_KEY": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Your API key from the Chainbase platform to access blockchain data.",
+                "optional": false
+            }
+        }
     }
 }
